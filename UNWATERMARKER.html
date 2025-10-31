@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="">
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="robots" content="noindex">
+        <meta name="googlebot" content="noindex">
+        <title>Watermark Remover</title>
+        <link rel="stylesheet" href="resources/watermark.UIv2.css" type="text/css">
+        <link rel="stylesheet" href="resources/mobile.css" type="text/css">
+    </head>
+    <body>
+        <div class="top">
+            <header>
+                <table>
+                    <tbody><tr>
+                        <td style="width: 3em;background-color: #161616;" onclick="toggleSidebar(this)"> &lt; </td>
+                        <td><b>HTML Unwatermarker 1.6.0</b></td>
+                        <td style="width: 3em;"> <!--&lt;--> </td>
+                    </tr></tbody>
+                </table>
+            </header>
+            <content>
+                <div>
+                    <div class="left">
+                        <h2 style="/*height: 2em;*/"> Watermark Remover <small>v1.6.0</small> </h2>
+                        <div class="option multiple">
+                            <div class="optiontitle">Load image file(s)</div>
+                            <input type="file" id="inputImage" multiple class="optionbox" />
+                            <small>Drag-and-dropping images is also supported.</small>
+                        </div>
+                        <div class="option multiple">
+                            <div class="optiontitle">Load watermark file</div>
+                            <input type="file" id="inputWatermark" class="optionbox" />
+                        </div>
+                        <div class="optionscontainer">
+                            <div class="option multiple">
+                                <div class="optiontitle">Watermark Preset</div>
+                                <div class="extrasContainer">
+                                    <select id="preset" class="optionbox" onchange="applyPreset()">
+                                        <option value="0">0: </option>
+                                        <option value="1">1: </option>
+                                        <option value="2">2: </option>
+                                        <option value="3">3: </option>
+                                        <option value="4">4: </option>
+                                        <option value="5">5: </option>
+                                        <option value="6">6: </option>
+                                        <option value="7">7: </option>
+                                        <option value="8">8: </option>
+                                        <option value="9">9: </option>
+                                    </select>
+                                    <button onclick="applyPreset()"="applyPreset"> ► </button>
+                                </div>
+                                <small>They can also be invoked by your keyboard's number keys.</small>
+                                <details style="padding: 0.25em 0 0 0.5em;">
+                                    <summary> <small> Edit Preset </small> </summary>
+                                    <div style="padding: 0 0 1em 1em; border-left: 1px dashed white;">
+                                        <div class="option single">
+                                            <div class="optiontitle">Name:</div>
+                                            <input type="text" id="presetName" class="optionbox">
+                                        </div>
+                                        <div class="option multiple">
+                                            <div class="optiontitle">Anchor Point</div>
+                                            <select id="defaultPosition" class="optionbox">
+                                                <option value="top-left">Top Left Corner</option>
+                                                <option value="top-center">Top Center</option>
+                                                <option value="top-right">Top Right Corner</option>
+                                                <option value="center-left">Center Left</option>
+                                                <option value="center">Center</option>
+                                                <option value="center-right">Center Right</option>
+                                                <option value="bottom-left">Bottom Left Corner</option>
+                                                <option value="bottom-center">Bottom Center</option>
+                                                <option value="bottom-right">Bottom Right Corner</option>
+                                            </select>
+                                        </div>
+                                        <div class="option multiple">
+                                            <div class="optiontitle">Position relative to Anchor</div>
+                                            <div>
+                                                X: <span id="relPosX">0</span>px &nbsp; &nbsp; &nbsp;
+                                                Y: <span id="relPosY">0</span>px
+                                            </div>
+                                        </div>
+                                        <div class="option single">
+                                            <div class="optiontitle">Include JPEG Filter?</div>
+                                            <input type="checkbox" id="presetJPEG" class="optionbox">
+                                            <div>
+                                                Filter enabled: <input type="checkbox" id="infoJpegOn" disabled="true"> <br>
+                                                Radius: <span id="infoJpegRadius">3</span> <br>
+                                                Threshold: <span id="infoJpegThreshold">4</span>
+                                            </div>
+                                        </div>
+                                        <div class="option single" id="infoAlphaWrapper" style="display: none">
+                                            <div>
+                                                Alpha adjustment: <span id="infoAlpha">1</span>x
+                                            </div>
+                                        </div>
+                                        <div class="option single">
+                                            <div class="optiontitle">Include Watermark File?</div>
+                                            <input type="checkbox" id="presetWatermark" class="optionbox">
+                                            <small>Will save the currently used watermark with the preset.</small>
+                                        </div>
+                                        <br>
+                                        <button onclick="savePreset()"> Save Preset </button> &nbsp; <button onclick="importPreset()"> Import </button> <button onclick="exportPreset()">  Export </button>
+                                        <input type="file" id="presetFileLoader" style="display: none" accept=".json, application/json"/>
+                                    </div>
+                                </details>
+                            </div>
+                            <div class="option multiple">
+                                <div class="optiontitle">Preview blending mode</div>
+                                <select id="overlayMode" class="optionbox">
+                                    <option value="normal">Normal</option>
+                                    <option value="difference">Difference</option>
+                                    <option value="rt">Real-time unwatermarking</option>
+                                </select>
+                            </div>
+                            <div class="option single">
+                                <div class="optiontitle">Confirm results</div>
+                                <input type="checkbox" id="preview" class="optionbox" checked="true">
+                            </div>
+                            <div class="option single">
+                                <div class="optiontitle">Automatic subpixel alignment</div>
+                                <input type="checkbox" id="autoSubpixel" class="optionbox">
+                            </div>
+                            <div class="option single">
+                                <div class="optiontitle">Filter JPEG noise</div>
+                                <input type="checkbox" id="filterJPEG" class="optionbox">
+                            </div>
+                            <div class="option single">
+                                <div class="optiontitle">Full batch mode</div>
+                                <input type="checkbox" id="fullBatch" class="optionbox">
+                            </div>
+                            <div class="option single">
+                                <div class="optiontitle"><i>Show advanced options</i></div>
+                                <input type="checkbox" id="showAdvanced" class="optionbox">
+                            </div>
+
+                            <div id="advancedOptions" style="display: none;">
+                                <div class="option multiple">
+                                    <div class="optiontitle">
+                                        Preview contrast
+                                        <span onclick="resetFilter('previewContrast')">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> 0x </small>
+                                        <input type="range" id="previewContrast" max="10" min="0" step="0.1" value="1" class="optionbox">
+                                        <small> 10x </small>
+                                    </div>
+                                </div>
+                                <div class="option multiple">
+                                    <div class="optiontitle">
+                                        Preview brightness
+                                        <span onclick="resetFilter('previewBrightness')">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> 0% </small>
+                                        <input type="range" id="previewBrightness" max="2" min="0" step="0.05" value="1" class="optionbox">
+                                        <small> 200% </small>
+                                    </div>
+                                </div>
+                                <div class="option multiple">
+                                    <div class="optiontitle">
+                                        Strength of JPEG Filter
+                                        <span onclick="document.getElementById('filterJPEGStrength').value = 3">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> 0 </small>
+                                        <input type="range" id="filterJPEGStrength" max="10" min="0" step="1" value="3" class="optionbox">
+                                        <small> 10 </small>
+                                    </div>
+                                </div>
+                                <div class="option multiple">
+                                    <div class="optiontitle">
+                                        Threshold of JPEG Filter
+                                        <span onclick="document.getElementById('filterJPEGThreshold').value = 4">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> 0 </small>
+                                        <input type="range" id="filterJPEGThreshold" max="25" min="0" step="1" value="4" class="optionbox">
+                                        <small> 25 </small>
+                                    </div>
+                                </div>
+                                <div class="option multiple">
+                                    <div class="optiontitle">Extras</div>
+                                    <div class="extrasContainer">
+                                        <select id="extras" class="optionbox">
+                                            <option value="none">---</option>
+                                            <option value="generateTencent">* Generate fitting Tencent (ac.qq.com) watermark </option>
+                                            <option value="resizeWatermark"> Resize watermark </option>
+                                            <option value="resizeWatermarkByPageSize"> Resize watermark based on original page size </option>
+                                            <option value="automaticPlacement">* Automatically detect watermark location </option>
+                                            <option value="guessAlpha"> Guess the watermark's opacity </option>
+                                            <option value="fuckNewtoki">* Detect location and opacity automatically </option>
+                                            <option value="fullReset"> Reset all Settings </option>
+                                        </select>
+                                        <button onclick="run_extra()"> ► </button>
+                                    </div>
+                                    <small> * will also be applied on image load </small>
+                                </div>
+                                <div class="option single">
+                                    <div class="optiontitle">Save as ZIP in batch mode</div>
+                                    <input type="checkbox" id="fullBatchZIP" class="optionbox" checked="true">
+                                </div>
+                                <div class="option multiple" style="display: none;">
+                                    <!-- currently broken -->
+                                    <div class="optiontitle">
+                                        Automatic (whole) pixel alignment
+                                        <span onclick="document.getElementById('autoWholePixel').value = 0">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> off </small>
+                                        <input type="range" id="autoWholePixel" max="10" min="0" step="1" value="0" class="optionbox">
+                                        <small> 21x21px </small>
+                                    </div>
+                                </div>
+                                <div class="option multiple">
+                                    <div class="optiontitle">
+                                        Watermark alpha adjustment
+                                        <span onclick="document.getElementById('alphaAdjust').value = 1; document.getElementById('infoAlphaWrapper').style.display = 'none'">↺</span>
+                                    </div>
+                                    <div class="rangeFlex">
+                                        <small> -50% </small>
+                                        <input type="range" id="alphaAdjust" max="1.5" min="0.5" step="0.01" value="1" class="optionbox">
+                                        <small> +50% </small>
+                                    </div>
+                                    <!--table style="width: 100%;">
+                                        <tr>
+                                            <td width="0"><small> -50% </small></td>
+                                            <td><input type="range" id="alphaAdjust" max="1.5" min="0.5" step="0.01" value="1" class="optionbox"></td>
+                                            <td width="0"><small> +50% </small></td>
+                                        </tr>
+                                    </table-->
+                                </div>
+                                <div class="option single">
+                                    <div class="optiontitle">Transparency threshold</div>
+                                    <input type="number" id="transparencyThreshold" max="255" min="0" value="3" class="optionbox">
+                                    <small>0 = fully transparent, 255 = fully opaque</small>
+                                </div>
+                                <div class="option single">
+                                    <div class="optiontitle">Opaque smoothing</div>
+                                    <input type="number" id="opaqueThreshold" max="255" min="0" value="240" class="optionbox">
+                                    <small>0 = every pixel, 255 = no pixels</small>
+                                </div>
+                                <div class="option single" style="display: none;">
+                                    <div class="optiontitle">Replace Edges</div>
+                                    <input type="checkbox" id="smoothEdges" class="optionbox">
+                                </div>
+                                <div class="option single" style="display: none;">
+                                    <div class="optiontitle">Adjust edge brightness</div>
+                                    <input type="checkbox" id="adjustBrightness" class="optionbox">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="buttonwrap">
+                            <!--button onclick="unwatermark()" class="unwatermark">Unwatermark</button>
+                            <button onclick="unwatermark()" class="unwatermark">Skip Image</button-->
+                            <div class="option multiple bottombuttons" id="unwatermarkbuttons" style="">
+                                <button onclick="unwatermark()" id="unwatermarkbutton" class="unwatermark">Unwatermark (↵)</button>
+                                <button onclick="nextImage()" id="skipbutton" style="display: none; margin-left: 1em;">Skip Image (. or ,)</button>
+                            </div>
+                            <div class="option multiple" id="confirm" style="display: none;">
+                                <table style="margin: 0 auto;">
+                                    <tbody>
+                                        <tr>
+                                            <td><button onclick="confirmYes()"> Continue (↵) </button></td>
+                                            <td><button onclick="confirmNo()"> Undo (-) </button></td>
+                                        </tr>
+                                        <tr>
+                                            <td colspan="2"><button onclick="confirmAnother()"> Remove another watermark (+) </button></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="zoomindicator">
+                            Zoom: <span id="zoom">100</span> &nbsp;
+                            <span onclick="zoomImage(-25)">−</span>
+                            <span onclick="resetZoom()">↺</span>
+                            <span onclick="zoomImage(25)">+</span>
+                            <div>
+                                <input type="checkbox" id="pixelatedZoom">
+                                Pixelated
+                            </div>
+                        </div>
+                    </div>
+                    <div class="right" style="left: calc(300px + 1em);">
+                        <div id="imageContainer">
+                            <img id="image" />
+                            <canvas id="watermark" width="0"></canvas>
+                            <canvas id="rtPrev1" width="0" style="mix-blend-mode: difference; display: none"></canvas>
+                            <canvas id="rtPrev2" width="0" style="mix-blend-mode: color-dodge; display: none"></canvas>
+                            <div id="rtPrevBox" style="display: none"></div>
+                        </div>
+                    </div>
+
+                    <!--<div style="position: fixed; bottom: 2em; right: 2em; background:#111a; padding: 1em; border-radius: 1em; backdrop-filter: blur(10px)">
+                        <style> #numpad td {border: 2px outset gray; padding: 0.5em; background:#fff3; backdrop-filter: blur(10px);} </style>
+                        <table width="250" height="300">
+                            <caption>
+                                Numpad Visualization
+                            </caption>
+                            <tbody id="numpad">
+                                <tr>
+                                    <td style="width:25%">Num</td>
+                                    <td style="width:25%">/</td>
+                                    <td style="width:25%">*</td>
+                                    <td style="width:25%">-</td>
+                                </tr>
+                                <tr>
+                                    <td>7</td>
+                                    <td>8</td>
+                                    <td>9</td>
+                                    <td rowspan="2">+</td>
+                                </tr>
+                                <tr>
+                                    <td>4</td>
+                                    <td>5</td>
+                                    <td>6</td>
+                                </tr>
+                                <tr>
+                                    <td>1</td>
+                                    <td>2</td>
+                                    <td>3</td>
+                                    <td rowspan="2">Enter</td>
+                                </tr>
+                                <tr>
+                                    <td colspan="2">0</td>
+                                    <td>.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <script>
+                            const numpadMapping = [
+                                "NumLock", '/', '*', '-',
+                                '7', '8', '9', '+',
+                                '4', '5', '6',
+                                '1', '2', '3', 'Enter',
+                                '0', '.'
+                            ]
+                            document.addEventListener('keydown', (e) => {
+                                let i = numpadMapping.indexOf(e.key)
+                                if (i >= 0) document.querySelectorAll('#numpad td')[i].style.background = '#fe4';
+                            })
+                            document.addEventListener('keyup', (e) => {
+                                let i = numpadMapping.indexOf(e.key)
+                                if (i >= 0) document.querySelectorAll('#numpad td')[i].style.background = '';
+                            })
+                        </script>
+                    </div>-->
+                </div>
+            </content>
+        </div>
+        <script src="resources/mobile.js"></script>
+        <script src="resources/nutlib.js"></script>
+        <script src="resources/pica9.min.js"></script>
+        <script src="resources/tencent_watermark.js"></script>
+        <script async src="resources/opencv.js"></script>
+        <script src="resources/image-ssim.min.js"></script>
+        <script src="resources/watermark.js"></script>
+    </body>
+</html>
