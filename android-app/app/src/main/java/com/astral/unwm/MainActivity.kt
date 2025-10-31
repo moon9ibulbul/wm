@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -422,9 +421,9 @@ private fun PreviewCard(
                                 alpha = 0.4f,
                                 contentScale = ContentScale.FillBounds
                             )
-                            Canvas(modifier = Modifier.matchParentSize()) {
-                                val highlightColor = MaterialTheme.colorScheme.primary
-                                val secondaryColor = MaterialTheme.colorScheme.outline
+                            val highlightColor = MaterialTheme.colorScheme.primary
+                            val secondaryColor = MaterialTheme.colorScheme.outline
+                            Canvas(modifier = Modifier.fillMaxSize()) {
                                 val strokeWidth = 2.dp.toPx()
                                 detectionResults.forEachIndexed { index, detection ->
                                     val color = if (index == selectedDetectionIndex) highlightColor else secondaryColor
