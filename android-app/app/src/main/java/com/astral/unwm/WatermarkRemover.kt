@@ -1,7 +1,7 @@
 package com.astral.unwm
 
 import android.graphics.Bitmap
-import kotlin.math.coerceAtLeast
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 object WatermarkRemover {
@@ -20,7 +20,7 @@ object WatermarkRemover {
         transparencyThreshold: Int,
         opaqueThreshold: Int
     ): Bitmap {
-        val safeAlphaAdjust = alphaAdjust.coerceAtLeast(0f)
+        val safeAlphaAdjust = max(alphaAdjust, 0f)
         val baseBitmap = base.copy(Bitmap.Config.ARGB_8888, true)
         val watermarkBitmap = if (watermark.config != Bitmap.Config.ARGB_8888) {
             watermark.copy(Bitmap.Config.ARGB_8888, false)
@@ -43,10 +43,10 @@ object WatermarkRemover {
             watermarkBitmap.height
         )
 
-        val baseStartX = offsetX.coerceAtLeast(0)
-        val baseStartY = offsetY.coerceAtLeast(0)
-        val wmStartX = (-offsetX).coerceAtLeast(0)
-        val wmStartY = (-offsetY).coerceAtLeast(0)
+        val baseStartX = max(offsetX, 0)
+        val baseStartY = max(offsetY, 0)
+        val wmStartX = max(-offsetX, 0)
+        val wmStartY = max(-offsetY, 0)
         val overlapWidth = minOf(
             baseBitmap.width - baseStartX,
             watermarkBitmap.width - wmStartX
@@ -83,7 +83,7 @@ object WatermarkRemover {
                 val wmR = (wmColor shr 16) and 0xFF
                 val wmG = (wmColor shr 8) and 0xFF
                 val wmB = wmColor and 0xFF
-                val denominator = (255 - adjustedAlpha).coerceAtLeast(1)
+                val denominator = max(255 - adjustedAlpha, 1)
                 val alphaImg = 255f / denominator
                 val alphaWm = -adjustedAlpha / denominator.toFloat()
                 var newR = (alphaImg * baseR + alphaWm * wmR).roundToInt().coerceIn(0, 255)
@@ -91,7 +91,7 @@ object WatermarkRemover {
                 var newB = (alphaImg * baseB + alphaWm * wmB).roundToInt().coerceIn(0, 255)
                 if (adjustedAlpha > opaqueClamp && x > 0) {
                     val blendFactor = (adjustedAlpha - opaqueClamp)
-                        .toFloat() / (255 - opaqueClamp).coerceAtLeast(1)
+                        .toFloat() / max(255 - opaqueClamp, 1)
                     val leftColor = resultPixels[baseIndex - 1]
                     val leftR = (leftColor shr 16) and 0xFF
                     val leftG = (leftColor shr 8) and 0xFF

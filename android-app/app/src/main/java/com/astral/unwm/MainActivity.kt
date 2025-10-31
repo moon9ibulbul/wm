@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -52,7 +53,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.toDp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -254,7 +254,8 @@ private fun PreviewCard(
         return
     }
     val baseImage: ImageBitmap = remember(baseBitmap) { baseBitmap.asImageBitmap() }
-    val watermarkImage: ImageBitmap? = remember(watermarkBitmap) { watermarkBitmap?.asImageBitmap() }
+    val currentWatermarkBitmap = watermarkBitmap
+    val watermarkImage: ImageBitmap? = remember(currentWatermarkBitmap) { currentWatermarkBitmap?.asImageBitmap() }
     val density = LocalDensity.current
 
     Card(
@@ -280,13 +281,13 @@ private fun PreviewCard(
                     modifier = Modifier.fillMaxSize(),
                     contentScale = ContentScale.Fit
                 )
-                watermarkImage?.let { wmImage ->
-                    val widthDp = with(density) { (watermarkBitmap!!.width * scale).toDp() }
-                    val heightDp = with(density) { (watermarkBitmap.height * scale).toDp() }
-                    val offsetXDp = with(density) { (offsetX * scale).toDp() }
-                    val offsetYDp = with(density) { (offsetY * scale).toDp() }
+                if (currentWatermarkBitmap != null && watermarkImage != null) {
+                    val widthDp = (currentWatermarkBitmap.width * scale / density.density).dp
+                    val heightDp = (currentWatermarkBitmap.height * scale / density.density).dp
+                    val offsetXDp = (offsetX * scale / density.density).dp
+                    val offsetYDp = (offsetY * scale / density.density).dp
                     Image(
-                        bitmap = wmImage,
+                        bitmap = watermarkImage,
                         contentDescription = null,
                         modifier = Modifier
                             .align(Alignment.TopStart)
