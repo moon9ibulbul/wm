@@ -13,7 +13,6 @@ import kotlin.math.max
 import kotlin.math.min
 
 private const val DEFAULT_MATCH_THRESHOLD = 0.7
-private const val DEFAULT_MAX_RESULTS = 5
 private const val DEFAULT_ALPHA_THRESHOLD = 5.0
 
 /**
@@ -23,7 +22,7 @@ object WatermarkDetector {
     fun detect(
         base: Bitmap,
         watermark: Bitmap,
-        maxResults: Int = DEFAULT_MAX_RESULTS,
+        maxResults: Int = Int.MAX_VALUE,
         matchThreshold: Double = DEFAULT_MATCH_THRESHOLD,
         alphaThreshold: Double = DEFAULT_ALPHA_THRESHOLD
     ): List<WatermarkDetection> {
@@ -133,11 +132,12 @@ object WatermarkDetector {
             val maxResultX = (combinedResult.cols() - 1).toDouble().coerceAtLeast(0.0)
             val maxResultY = (combinedResult.rows() - 1).toDouble().coerceAtLeast(0.0)
 
-            repeat(maxResults) {
+            var iterations = 0
+            while (iterations < maxResults) {
                 val minMax = Core.minMaxLoc(combinedResult)
                 val maxVal = minMax.maxVal
                 if (maxVal < matchThreshold) {
-                    return@repeat
+                    break
                 }
                 val maxLoc: Point = minMax.maxLoc
                 detections.add(
@@ -159,6 +159,7 @@ object WatermarkDetector {
                     Scalar(-1.0),
                     -1
                 )
+                iterations++
             }
 
             detections

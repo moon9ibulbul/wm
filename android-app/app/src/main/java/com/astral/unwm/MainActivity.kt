@@ -8,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -32,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.weight
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -49,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -85,6 +88,11 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+private data class QueuedImage(
+    val uri: Uri,
+    val displayName: String
+)
+
 @Composable
 fun AstralUNWMApp() {
     val context = LocalContext.current
@@ -99,35 +107,201 @@ fun AstralUNWMApp() {
     var opaqueThreshold by remember { mutableFloatStateOf(255f) }
 
     var isProcessing by remember { mutableStateOf(false) }
-    var lastSaveMessage by remember { mutableStateOf<String?>(null) }
+    var lastToastMessage by remember { mutableStateOf<String?>(null) }
     var detectionState by remember { mutableStateOf<DetectionState>(DetectionState.Idle) }
     var detectionResults by remember { mutableStateOf<List<WatermarkDetection>>(emptyList()) }
-    var selectedDetectionIndex by remember { mutableStateOf<Int?>(null) }
-    var applyAllDetections by remember { mutableStateOf(false) }
+    var selectedDetectionIndices by remember { mutableStateOf<Set<Int>>(emptySet()) }
+    var applyAllDetections by remember { mutableStateOf(true) }
+
+    val bulkQueue = remember { mutableStateListOf<QueuedImage>() }
+    var currentQueueItemName by remember { mutableStateOf<String?>(null) }
+    var isLoadingQueueItem by remember { mutableStateOf(false) }
+    var isAutomationRunning by remember { mutableStateOf(false) }
+    var automationProgress by remember { mutableStateOf(0) }
+    var automationTotal by remember { mutableStateOf(0) }
 
     val scope = rememberCoroutineScope()
 
-    val pickBaseImage = rememberImagePickerLauncher(context) { bitmap ->
+    fun updateBase(bitmap: Bitmap?, label: String?) {
         baseBitmap = bitmap
         resultBitmap = null
         detectionState = DetectionState.Idle
         detectionResults = emptyList()
-        selectedDetectionIndex = null
-        applyAllDetections = false
+        selectedDetectionIndices = emptySet()
+        applyAllDetections = true
+        currentQueueItemName = label
+        isProcessing = false
+        offsetX = 0f
+        offsetY = 0f
+    }
+
+    fun loadNextQueueImage() {
+        val next = bulkQueue.firstOrNull()
+        if (next == null) {
+            isLoadingQueueItem = false
+            updateBase(null, null)
+            return
+        }
+        isLoadingQueueItem = true
+        scope.launch {
+            val bitmap = withContext(Dispatchers.IO) { loadBitmapFromUri(context, next.uri) }
+            if (bitmap != null) {
+                updateBase(bitmap, next.displayName)
+                isLoadingQueueItem = false
+            } else {
+                isLoadingQueueItem = false
+                bulkQueue.removeAt(0)
+                lastToastMessage = context.getString(R.string.toast_bulk_failed)
+                loadNextQueueImage()
+            }
+        }
+    }
+
+    fun advanceQueue() {
+        if (bulkQueue.isEmpty()) {
+            updateBase(null, null)
+            return
+        }
+        bulkQueue.removeAt(0)
+        loadNextQueueImage()
+    }
+
+    fun clearQueue() {
+        if (bulkQueue.isEmpty()) return
+        bulkQueue.clear()
+        updateBase(null, null)
+    }
+
+    fun startAutomation() {
+        if (isAutomationRunning) {
+            return
+        }
+        if (isLoadingQueueItem) {
+            lastToastMessage = context.getString(R.string.toast_queue_loading)
+            return
+        }
+        val watermark = watermarkBitmap
+        if (watermark == null) {
+            lastToastMessage = context.getString(R.string.toast_automation_needs_watermark)
+            return
+        }
+        if (bulkQueue.isEmpty()) {
+            lastToastMessage = context.getString(R.string.toast_bulk_empty)
+            return
+        }
+        isAutomationRunning = true
+        automationProgress = 0
+        automationTotal = bulkQueue.size
+        resultBitmap = null
+        scope.launch {
+            val queueSnapshot = bulkQueue.toList()
+            var savedCount = 0
+            var processedCount = 0
+            try {
+                queueSnapshot.forEach { item ->
+                    val base = withContext(Dispatchers.IO) { loadBitmapFromUri(context, item.uri) }
+                    processedCount++
+                    automationProgress = processedCount
+                    if (base == null) {
+                        return@forEach
+                    }
+                    val detections = withContext(Dispatchers.Default) {
+                        WatermarkDetector.detect(base, watermark)
+                    }
+                    if (detections.isEmpty()) {
+                        return@forEach
+                    }
+                    val offsets = collectOffsets(
+                        manualOffset = null,
+                        detectionResults = detections,
+                        applyAll = true,
+                        selectedIndices = emptySet()
+                    )
+                    val processedBitmap = withContext(Dispatchers.Default) {
+                        offsets.fold(base) { current, detection ->
+                            WatermarkRemover.removeWatermark(
+                                base = current,
+                                watermark = watermark,
+                                offsetX = detection.offsetX.roundToInt(),
+                                offsetY = detection.offsetY.roundToInt(),
+                                alphaAdjust = alphaAdjust,
+                                transparencyThreshold = transparencyThreshold.roundToInt(),
+                                opaqueThreshold = opaqueThreshold.roundToInt()
+                            )
+                        }
+                    }
+                    val saved = withContext(Dispatchers.IO) {
+                        saveBitmapToGallery(context, processedBitmap)
+                    }
+                    if (saved) {
+                        savedCount++
+                        resultBitmap = processedBitmap
+                    }
+                }
+                lastToastMessage = context.getString(
+                    R.string.toast_automation_done,
+                    savedCount,
+                    queueSnapshot.size
+                )
+            } catch (e: Exception) {
+                if (e is java.util.concurrent.CancellationException) throw e
+                lastToastMessage = context.getString(
+                    R.string.toast_automation_failed,
+                    e.message ?: context.getString(R.string.toast_unknown_error)
+                )
+            } finally {
+                isAutomationRunning = false
+                automationProgress = 0
+                automationTotal = 0
+                bulkQueue.clear()
+                updateBase(null, null)
+                isLoadingQueueItem = false
+            }
+        }
+    }
+
+    val pickBaseImage = rememberImagePickerLauncher(context) { bitmap ->
+        bulkQueue.clear()
+        currentQueueItemName = null
+        updateBase(bitmap, null)
     }
     val pickWatermark = rememberImagePickerLauncher(context) { bitmap ->
         watermarkBitmap = bitmap
         resultBitmap = null
         detectionState = DetectionState.Idle
         detectionResults = emptyList()
-        selectedDetectionIndex = null
-        applyAllDetections = false
+        selectedDetectionIndices = emptySet()
+        applyAllDetections = true
+    }
+    val pickBulkImages = rememberLauncherForActivityResult(
+        ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        if (uris.isEmpty()) {
+            return@rememberLauncherForActivityResult
+        }
+        scope.launch {
+            val queueWasEmpty = bulkQueue.isEmpty()
+            val startIndex = bulkQueue.size
+            var added = 0
+            uris.forEachIndexed { index, uri ->
+                val displayName = resolveDisplayName(context, uri)?.takeIf { it.isNotBlank() }
+                    ?: context.getString(R.string.queue_item_fallback, startIndex + index + 1)
+                bulkQueue.add(QueuedImage(uri, displayName))
+                added++
+            }
+            if (added > 0) {
+                lastToastMessage = context.getString(R.string.toast_bulk_loaded, added)
+                if (queueWasEmpty || baseBitmap == null) {
+                    loadNextQueueImage()
+                }
+            }
+        }
     }
 
-    LaunchedEffect(lastSaveMessage) {
-        lastSaveMessage?.let {
+    LaunchedEffect(lastToastMessage) {
+        lastToastMessage?.let {
             Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            lastSaveMessage = null
+            lastToastMessage = null
         }
     }
 
@@ -135,8 +309,8 @@ fun AstralUNWMApp() {
         val base = baseBitmap
         val wm = watermarkBitmap
         detectionResults = emptyList()
-        selectedDetectionIndex = null
-        applyAllDetections = false
+        selectedDetectionIndices = emptySet()
+        applyAllDetections = true
         if (base != null && wm != null) {
             detectionState = DetectionState.Running
             try {
@@ -150,7 +324,7 @@ fun AstralUNWMApp() {
                     val first = detections.first()
                     offsetX = first.offsetX
                     offsetY = first.offsetY
-                    selectedDetectionIndex = 0
+                    selectedDetectionIndices = setOf(0)
                     DetectionState.Success
                 }
             } catch (e: Exception) {
@@ -175,14 +349,27 @@ fun AstralUNWMApp() {
         )
 
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(onClick = { pickBaseImage.launch("image/*") }) {
+            Button(
+                onClick = { pickBaseImage.launch("image/*") },
+                enabled = !isAutomationRunning
+            ) {
                 Text(text = stringResource(id = R.string.select_image))
             }
-            Button(onClick = { pickWatermark.launch("image/*") }) {
+            Button(
+                onClick = { pickWatermark.launch("image/*") },
+                enabled = !isAutomationRunning
+            ) {
                 Text(text = stringResource(id = R.string.select_watermark))
             }
-            if (baseBitmap != null || watermarkBitmap != null) {
+            OutlinedButton(
+                onClick = { pickBulkImages.launch("image/*") },
+                enabled = !isAutomationRunning
+            ) {
+                Text(text = stringResource(id = R.string.select_images_bulk))
+            }
+            if (baseBitmap != null || watermarkBitmap != null || bulkQueue.isNotEmpty()) {
                 TextButton(onClick = {
+                    clearQueue()
                     baseBitmap = null
                     watermarkBitmap = null
                     resultBitmap = null
@@ -190,12 +377,28 @@ fun AstralUNWMApp() {
                     offsetY = 0f
                     detectionState = DetectionState.Idle
                     detectionResults = emptyList()
-                    selectedDetectionIndex = null
-                    applyAllDetections = false
+                    selectedDetectionIndices = emptySet()
+                    applyAllDetections = true
                 }) {
                     Text(text = stringResource(id = R.string.reset))
                 }
             }
+        }
+
+        if (bulkQueue.isNotEmpty() || currentQueueItemName != null) {
+            BulkQueueCard(
+                queueSize = bulkQueue.size,
+                currentItemName = currentQueueItemName,
+                isLoadingCurrent = isLoadingQueueItem,
+                canMarkComplete = !isProcessing && !isAutomationRunning && !isLoadingQueueItem && bulkQueue.isNotEmpty() && resultBitmap != null,
+                isAutomationRunning = isAutomationRunning,
+                automationProgress = automationProgress,
+                automationTotal = automationTotal,
+                onMarkComplete = { advanceQueue() },
+                onSkipCurrent = { advanceQueue() },
+                onClearQueue = { clearQueue() },
+                onAutomate = { startAutomation() }
+            )
         }
 
         PreviewCard(
@@ -204,24 +407,31 @@ fun AstralUNWMApp() {
             offsetX = offsetX,
             offsetY = offsetY,
             detectionResults = detectionResults,
-            selectedDetectionIndex = selectedDetectionIndex,
+            selectedDetectionIndices = selectedDetectionIndices,
             onSetOffset = { x, y ->
                 offsetX = x
                 offsetY = y
-                selectedDetectionIndex = null
+                selectedDetectionIndices = emptySet()
             }
         )
         WatermarkPreviewCard(watermarkBitmap)
         DetectionCard(
             detectionState = detectionState,
             detectionResults = detectionResults,
-            selectedDetectionIndex = selectedDetectionIndex,
+            selectedDetections = selectedDetectionIndices,
             applyAllDetections = applyAllDetections,
-            onDetectionSelected = { index ->
+            onDetectionToggled = { index ->
                 detectionResults.getOrNull(index)?.let { detection ->
-                    offsetX = detection.offsetX
-                    offsetY = detection.offsetY
-                    selectedDetectionIndex = index
+                    val next = selectedDetectionIndices.toMutableSet().apply {
+                        if (!add(index)) {
+                            remove(index)
+                        }
+                    }
+                    if (index !in selectedDetectionIndices) {
+                        offsetX = detection.offsetX
+                        offsetY = detection.offsetY
+                    }
+                    selectedDetectionIndices = next
                 }
             },
             onApplyAllDetectionsChanged = { checked ->
@@ -234,7 +444,7 @@ fun AstralUNWMApp() {
             value = offsetX,
             onValueChange = {
                 offsetX = it
-                selectedDetectionIndex = null
+                selectedDetectionIndices = emptySet()
             },
             valueRange = -1000f..1000f,
             valueFormatter = { value -> "${value.roundToInt()} px" }
@@ -244,7 +454,7 @@ fun AstralUNWMApp() {
             value = offsetY,
             onValueChange = {
                 offsetY = it
-                selectedDetectionIndex = null
+                selectedDetectionIndices = emptySet()
             },
             valueRange = -1000f..1000f,
             valueFormatter = { value -> "${value.roundToInt()} px" }
@@ -294,19 +504,12 @@ fun AstralUNWMApp() {
                     isProcessing = true
                     scope.launch {
                         val result = withContext(Dispatchers.Default) {
-                            val offsetsToApply = mutableListOf<WatermarkDetection>()
-                            val uniqueOffsets = mutableSetOf<Pair<Int, Int>>()
-                            fun addOffset(detection: WatermarkDetection) {
-                                val key = detection.offsetX.roundToInt() to detection.offsetY.roundToInt()
-                                if (uniqueOffsets.add(key)) {
-                                    offsetsToApply.add(detection)
-                                }
-                            }
-                            addOffset(WatermarkDetection(offsetX, offsetY, 1f))
-                            if (applyAllDetections) {
-                                detectionResults.forEach { addOffset(it) }
-                            }
-
+                            val offsetsToApply = collectOffsets(
+                                manualOffset = WatermarkDetection(offsetX, offsetY, 1f),
+                                detectionResults = detectionResults,
+                                applyAll = applyAllDetections,
+                                selectedIndices = selectedDetectionIndices
+                            )
                             offsetsToApply.fold(base) { currentBitmap, detection ->
                                 WatermarkRemover.removeWatermark(
                                     base = currentBitmap,
@@ -341,9 +544,12 @@ fun AstralUNWMApp() {
                     val saved = withContext(Dispatchers.IO) {
                         saveBitmapToGallery(context, bitmap)
                     }
-                    lastSaveMessage = context.getString(
+                    lastToastMessage = context.getString(
                         if (saved) R.string.saved_to_gallery else R.string.save_failed
                     )
+                    if (saved && bulkQueue.isNotEmpty() && !isAutomationRunning) {
+                        advanceQueue()
+                    }
                 }
             }
         )
@@ -357,7 +563,7 @@ private fun PreviewCard(
     offsetX: Float,
     offsetY: Float,
     detectionResults: List<WatermarkDetection>,
-    selectedDetectionIndex: Int?,
+    selectedDetectionIndices: Set<Int>,
     onSetOffset: (Float, Float) -> Unit
 ) {
     Card(
@@ -426,7 +632,7 @@ private fun PreviewCard(
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val strokeWidth = 2.dp.toPx()
                                 detectionResults.forEachIndexed { index, detection ->
-                                    val color = if (index == selectedDetectionIndex) highlightColor else secondaryColor
+                                    val color = if (index in selectedDetectionIndices) highlightColor else secondaryColor
                                     val left = detection.offsetX * scale
                                     val top = detection.offsetY * scale
                                     val rectWidth = currentWatermarkBitmap.width * scale
@@ -466,9 +672,9 @@ private fun PreviewCard(
 private fun DetectionCard(
     detectionState: DetectionState,
     detectionResults: List<WatermarkDetection>,
-    selectedDetectionIndex: Int?,
+    selectedDetections: Set<Int>,
     applyAllDetections: Boolean,
-    onDetectionSelected: (Int) -> Unit,
+    onDetectionToggled: (Int) -> Unit,
     onApplyAllDetectionsChanged: (Boolean) -> Unit
 ) {
     Card(
@@ -510,12 +716,12 @@ private fun DetectionCard(
                             index + 1,
                             detection.score.toDouble()
                         )
-                        if (index == selectedDetectionIndex) {
-                            Button(onClick = { onDetectionSelected(index) }) {
+                        if (index in selectedDetections) {
+                            Button(onClick = { onDetectionToggled(index) }) {
                                 Text(text = label)
                             }
                         } else {
-                            OutlinedButton(onClick = { onDetectionSelected(index) }) {
+                            OutlinedButton(onClick = { onDetectionToggled(index) }) {
                                 Text(text = label)
                             }
                         }
@@ -534,6 +740,96 @@ private fun DetectionCard(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BulkQueueCard(
+    queueSize: Int,
+    currentItemName: String?,
+    isLoadingCurrent: Boolean,
+    canMarkComplete: Boolean,
+    isAutomationRunning: Boolean,
+    automationProgress: Int,
+    automationTotal: Int,
+    onMarkComplete: () -> Unit,
+    onSkipCurrent: () -> Unit,
+    onClearQueue: () -> Unit,
+    onAutomate: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors()
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text(
+                text = stringResource(id = R.string.bulk_card_title),
+                style = MaterialTheme.typography.titleMedium
+            )
+            Text(text = stringResource(id = R.string.bulk_queue_count, queueSize))
+            if (isLoadingCurrent) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
+                    Text(
+                        text = stringResource(id = R.string.bulk_current_loading),
+                        modifier = Modifier.padding(start = 8.dp)
+                    )
+                }
+            } else if (!currentItemName.isNullOrBlank()) {
+                Text(text = stringResource(id = R.string.bulk_current_label, currentItemName))
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Button(
+                    onClick = onMarkComplete,
+                    enabled = canMarkComplete,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = stringResource(id = R.string.bulk_mark_complete))
+                }
+                OutlinedButton(
+                    onClick = onSkipCurrent,
+                    enabled = !isAutomationRunning && queueSize > 0 && !isLoadingCurrent,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(text = stringResource(id = R.string.bulk_skip))
+                }
+            }
+            TextButton(
+                onClick = onClearQueue,
+                enabled = !isAutomationRunning && !isLoadingCurrent,
+                modifier = Modifier.align(Alignment.End)
+            ) {
+                Text(text = stringResource(id = R.string.bulk_clear))
+            }
+            Button(
+                onClick = onAutomate,
+                enabled = !isAutomationRunning && queueSize > 0 && !isLoadingCurrent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = if (isAutomationRunning) {
+                        stringResource(id = R.string.bulk_automation_running_button)
+                    } else {
+                        stringResource(id = R.string.bulk_automation_start)
+                    }
+                )
+            }
+            if (isAutomationRunning && automationTotal > 0) {
+                Text(
+                    text = stringResource(
+                        id = R.string.bulk_automation_status,
+                        automationProgress.coerceAtMost(automationTotal),
+                        automationTotal
+                    )
+                )
             }
         }
     }
@@ -645,6 +941,31 @@ private fun SliderCard(
     }
 }
 
+private fun collectOffsets(
+    manualOffset: WatermarkDetection?,
+    detectionResults: List<WatermarkDetection>,
+    applyAll: Boolean,
+    selectedIndices: Set<Int>
+): List<WatermarkDetection> {
+    val offsetsToApply = mutableListOf<WatermarkDetection>()
+    val uniqueOffsets = mutableSetOf<Pair<Int, Int>>()
+    fun addOffset(detection: WatermarkDetection) {
+        val key = detection.offsetX.roundToInt() to detection.offsetY.roundToInt()
+        if (uniqueOffsets.add(key)) {
+            offsetsToApply.add(detection)
+        }
+    }
+    manualOffset?.let { addOffset(it) }
+    if (applyAll) {
+        detectionResults.forEach { addOffset(it) }
+    } else {
+        selectedIndices.sorted().forEach { index ->
+            detectionResults.getOrNull(index)?.let { addOffset(it) }
+        }
+    }
+    return offsetsToApply
+}
+
 private fun saveBitmapToGallery(context: Context, bitmap: Bitmap): Boolean {
     val filename = "AstralUNWM_${System.currentTimeMillis()}.png"
     val resolver = context.contentResolver
@@ -690,10 +1011,30 @@ private fun rememberImagePickerLauncher(
             onBitmapLoaded(null)
             return@rememberLauncherForActivityResult
         }
-        val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+        val bitmap = loadBitmapFromUri(context, uri)
+        onBitmapLoaded(bitmap)
+    }
+
+private fun loadBitmapFromUri(context: Context, uri: Uri): Bitmap? {
+    return try {
+        context.contentResolver.openInputStream(uri)?.use { inputStream ->
             inputStream.buffered().use { bufferedStream ->
                 BitmapFactory.decodeStream(bufferedStream)?.copy(Bitmap.Config.ARGB_8888, true)
             }
         }
-        onBitmapLoaded(bitmap)
+    } catch (e: Exception) {
+        null
     }
+}
+
+private fun resolveDisplayName(context: Context, uri: Uri): String? {
+    return context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+        ?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val index = cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)
+                cursor.getString(index)
+            } else {
+                null
+            }
+        }
+}
