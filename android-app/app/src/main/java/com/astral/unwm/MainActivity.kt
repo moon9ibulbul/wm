@@ -42,6 +42,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -126,7 +127,7 @@ private enum class AppTab(@StringRes val titleRes: Int) {
 @Composable
 fun AstralUNWMApp() {
     var selectedTab by remember { mutableStateOf(AppTab.Unwatermarker) }
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
         TabRow(selectedTabIndex = selectedTab.ordinal) {
             AppTab.values().forEach { tab ->
                 Tab(
@@ -408,11 +409,6 @@ fun UnwatermarkerScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = stringResource(id = R.string.app_name),
-            style = MaterialTheme.typography.headlineMedium
-        )
-
         FlowRow(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -1457,6 +1453,7 @@ private fun PreviewCard(
                 val currentWatermarkBitmap = watermarkBitmap
                 val watermarkImage: ImageBitmap? = currentWatermarkBitmap?.asImageBitmap()
                 val density = LocalDensity.current
+                val coroutineScope = rememberCoroutineScope()
                 BoxWithConstraints(
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1473,16 +1470,18 @@ private fun PreviewCard(
                                         val newOffsetX = (tapOffset.x / scale) - currentWatermarkBitmap.width / 2f
                                         val newOffsetY = (tapOffset.y / scale) - currentWatermarkBitmap.height / 2f
                                         onSetOffset(newOffsetX, newOffsetY)
-                                        val refined = withContext(Dispatchers.Default) {
-                                            WatermarkDetector.refinePosition(
-                                                base = base,
-                                                watermark = currentWatermarkBitmap,
-                                                approximateOffsetX = newOffsetX,
-                                                approximateOffsetY = newOffsetY
-                                            )
-                                        }
-                                        if (refined != null) {
-                                            onSetOffset(refined.offsetX, refined.offsetY)
+                                        coroutineScope.launch {
+                                            val refined = withContext(Dispatchers.Default) {
+                                                WatermarkDetector.refinePosition(
+                                                    base = base,
+                                                    watermark = currentWatermarkBitmap,
+                                                    approximateOffsetX = newOffsetX,
+                                                    approximateOffsetY = newOffsetY
+                                                )
+                                            }
+                                            if (refined != null) {
+                                                onSetOffset(refined.offsetX, refined.offsetY)
+                                            }
                                         }
                                     }
                                 }
