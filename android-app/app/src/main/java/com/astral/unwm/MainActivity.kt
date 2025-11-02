@@ -1468,11 +1468,22 @@ private fun PreviewCard(
                             .fillMaxWidth()
                             .aspectRatio(aspectRatio)
                             .pointerInput(base, currentWatermarkBitmap) {
-                                if (currentWatermarkBitmap != null) {
+                                if (base != null && currentWatermarkBitmap != null) {
                                     detectTapGestures { tapOffset ->
                                         val newOffsetX = (tapOffset.x / scale) - currentWatermarkBitmap.width / 2f
                                         val newOffsetY = (tapOffset.y / scale) - currentWatermarkBitmap.height / 2f
                                         onSetOffset(newOffsetX, newOffsetY)
+                                        val refined = withContext(Dispatchers.Default) {
+                                            WatermarkDetector.refinePosition(
+                                                base = base,
+                                                watermark = currentWatermarkBitmap,
+                                                approximateOffsetX = newOffsetX,
+                                                approximateOffsetY = newOffsetY
+                                            )
+                                        }
+                                        if (refined != null) {
+                                            onSetOffset(refined.offsetX, refined.offsetY)
+                                        }
                                     }
                                 }
                             }
