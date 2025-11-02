@@ -1,6 +1,7 @@
 package com.astral.unwm
 
 import android.graphics.Bitmap
+import android.graphics.Color
 import org.opencv.android.Utils
 import org.opencv.core.Core
 import org.opencv.core.CvType
@@ -9,8 +10,11 @@ import org.opencv.core.Point
 import org.opencv.core.Rect
 import org.opencv.core.Scalar
 import org.opencv.imgproc.Imgproc
+import kotlin.math.abs
+import kotlin.math.floor
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 private const val DEFAULT_MATCH_THRESHOLD = 0.9
 private const val DEFAULT_ALPHA_THRESHOLD = 5.0
@@ -30,6 +34,9 @@ object WatermarkDetector {
             return emptyList()
         }
 
+        val workingBase = ensureArgb(base)
+        val workingWatermark = ensureArgb(watermark)
+
         val baseMat = Mat()
         val watermarkMat = Mat()
         val baseGray = Mat()
@@ -43,14 +50,15 @@ object WatermarkDetector {
         var watermarkGrayRoi = Mat()
         var watermarkMaskRoi = Mat()
         var watermarkBgrRoi = Mat()
+        var watermarkAlphaRoi = Mat()
         var resultGray = Mat()
         var colorAccumulation = Mat()
         var resultEdges = Mat()
         var combinedResult = Mat()
 
         return try {
-            Utils.bitmapToMat(base, baseMat)
-            Utils.bitmapToMat(watermark, watermarkMat)
+            Utils.bitmapToMat(workingBase, baseMat)
+            Utils.bitmapToMat(workingWatermark, watermarkMat)
 
             Imgproc.cvtColor(baseMat, baseGray, Imgproc.COLOR_RGBA2GRAY)
             Imgproc.cvtColor(watermarkMat, watermarkGray, Imgproc.COLOR_RGBA2GRAY)
@@ -67,6 +75,33 @@ object WatermarkDetector {
             watermarkGrayRoi = Mat(watermarkGray, roiRect).clone()
             watermarkMaskRoi = Mat(mask, roiRect).clone()
             watermarkBgrRoi = Mat(watermarkBgr, roiRect).clone()
+            watermarkAlphaRoi = Mat(alphaChannel, roiRect).clone()
+
+            val watermarkRoiBitmap = Bitmap.createBitmap(
+                workingWatermark,
+                roiRect.x,
+                roiRect.y,
+                roiRect.width,
+                roiRect.height
+            )
+            val watermarkRoiPixels = IntArray(roiRect.width * roiRect.height)
+            watermarkRoiBitmap.getPixels(
+                watermarkRoiPixels,
+                0,
+                roiRect.width,
+                0,
+                0,
+                roiRect.width,
+                roiRect.height
+            )
+            val watermarkAlphaData = DoubleArray(roiRect.width * roiRect.height)
+            watermarkAlphaRoi.get(0, 0, watermarkAlphaData)
+            val verificationContext = DetectionVerificationContext(
+                baseBitmap = workingBase,
+                roiRect = roiRect,
+                watermarkPixels = watermarkRoiPixels,
+                watermarkAlpha = watermarkAlphaData
+            )
 
             val resultCols = baseGray.cols() - watermarkGrayRoi.cols() + 1
             val resultRows = baseGray.rows() - watermarkGrayRoi.rows() + 1
@@ -140,13 +175,22 @@ object WatermarkDetector {
                     break
                 }
                 val maxLoc: Point = minMax.maxLoc
-                detections.add(
-                    WatermarkDetection(
-                        offsetX = (maxLoc.x - roiRect.x).toFloat(),
-                        offsetY = (maxLoc.y - roiRect.y).toFloat(),
-                        score = maxVal.toFloat()
-                    )
+                val candidate = WatermarkDetection(
+                    offsetX = (maxLoc.x - roiRect.x).toFloat(),
+                    offsetY = (maxLoc.y - roiRect.y).toFloat(),
+                    score = maxVal.toFloat()
                 )
+                val penalty = computeVerificationPenalty(candidate, verificationContext)
+                val adjustedScore = (maxVal * (1.0 - penalty)).toFloat()
+                if (penalty <= 0.45 && adjustedScore >= matchThreshold * 0.6f) {
+                    detections.add(
+                        WatermarkDetection(
+                            offsetX = candidate.offsetX,
+                            offsetY = candidate.offsetY,
+                            score = adjustedScore
+                        )
+                    )
+                }
 
                 val topLeftX = max(0.0, maxLoc.x - suppressionRadiusX)
                 val topLeftY = max(0.0, maxLoc.y - suppressionRadiusY)
@@ -176,6 +220,7 @@ object WatermarkDetector {
             watermarkGrayRoi.release()
             watermarkMaskRoi.release()
             watermarkBgrRoi.release()
+            watermarkAlphaRoi.release()
             baseEdges.release()
             resultGray.release()
             colorAccumulation.release()
@@ -183,4 +228,164 @@ object WatermarkDetector {
             combinedResult.release()
         }
     }
+
+    fun refinePosition(
+        base: Bitmap,
+        watermark: Bitmap,
+        approximateOffsetX: Float,
+        approximateOffsetY: Float,
+        searchScale: Float = 2f
+    ): WatermarkDetection? {
+        if (base.width < watermark.width || base.height < watermark.height) {
+            return null
+        }
+
+        val searchWidth = (watermark.width * searchScale).roundToInt()
+            .coerceAtLeast(watermark.width)
+            .coerceAtMost(base.width)
+        val searchHeight = (watermark.height * searchScale).roundToInt()
+            .coerceAtLeast(watermark.height)
+            .coerceAtMost(base.height)
+
+        val centerX = (approximateOffsetX + watermark.width / 2f)
+            .coerceIn(0f, base.width.toFloat())
+        val centerY = (approximateOffsetY + watermark.height / 2f)
+            .coerceIn(0f, base.height.toFloat())
+
+        val halfSearchWidth = searchWidth / 2f
+        val halfSearchHeight = searchHeight / 2f
+        val tentativeLeft = floor(centerX - halfSearchWidth).toInt()
+        val tentativeTop = floor(centerY - halfSearchHeight).toInt()
+        val maxLeft = base.width - searchWidth
+        val maxTop = base.height - searchHeight
+        val left = tentativeLeft.coerceIn(0, maxLeft)
+        val top = tentativeTop.coerceIn(0, maxTop)
+
+        val croppedBase = Bitmap.createBitmap(base, left, top, searchWidth, searchHeight)
+        val refined = detect(
+            base = croppedBase,
+            watermark = watermark,
+            maxResults = 1
+        ).firstOrNull() ?: return null
+
+        return refined.copy(
+            offsetX = refined.offsetX + left,
+            offsetY = refined.offsetY + top
+        )
+    }
+
+    private fun ensureArgb(source: Bitmap): Bitmap {
+        return if (source.config == Bitmap.Config.ARGB_8888) {
+            source
+        } else {
+            source.copy(Bitmap.Config.ARGB_8888, false)
+        }
+    }
+
+    private fun computeVerificationPenalty(
+        detection: WatermarkDetection,
+        context: DetectionVerificationContext
+    ): Double {
+        val roi = context.roiRect
+        val width = roi.width
+        val height = roi.height
+        if (width <= 0 || height <= 0) {
+            return 1.0
+        }
+        val baseLeft = detection.offsetX.roundToInt() + roi.x
+        val baseTop = detection.offsetY.roundToInt() + roi.y
+        if (
+            baseLeft < 0 ||
+            baseTop < 0 ||
+            baseLeft + width > context.baseBitmap.width ||
+            baseTop + height > context.baseBitmap.height
+        ) {
+            return 1.0
+        }
+
+        val basePixels = IntArray(width * height)
+        context.baseBitmap.getPixels(
+            basePixels,
+            0,
+            width,
+            baseLeft,
+            baseTop,
+            width,
+            height
+        )
+
+        var highAlphaDiffSum = 0.0
+        var highAlphaCount = 0
+        var mediumPenaltySum = 0.0
+        var mediumAlphaCount = 0
+
+        for (index in basePixels.indices) {
+            val alpha = context.watermarkAlpha[index] / 255.0
+            if (alpha <= 0.01) {
+                continue
+            }
+
+            val baseColor = basePixels[index]
+            val wmColor = context.watermarkPixels[index]
+            val baseR = Color.red(baseColor)
+            val baseG = Color.green(baseColor)
+            val baseB = Color.blue(baseColor)
+            val wmR = Color.red(wmColor)
+            val wmG = Color.green(wmColor)
+            val wmB = Color.blue(wmColor)
+
+            if (alpha >= 0.85) {
+                highAlphaDiffSum +=
+                    abs(baseR - wmR) +
+                        abs(baseG - wmG) +
+                        abs(baseB - wmB)
+                highAlphaCount += 3
+            } else {
+                val denom = 1.0 - alpha
+                if (denom > 0.05) {
+                    mediumPenaltySum += channelOverflowPenalty(baseR, wmR, alpha)
+                    mediumPenaltySum += channelOverflowPenalty(baseG, wmG, alpha)
+                    mediumPenaltySum += channelOverflowPenalty(baseB, wmB, alpha)
+                    mediumAlphaCount += 3
+                }
+            }
+        }
+
+        val normalizedHighAlpha = if (highAlphaCount > 0) {
+            (highAlphaDiffSum / highAlphaCount) / 255.0
+        } else {
+            0.0
+        }
+        val normalizedMediumPenalty = if (mediumAlphaCount > 0) {
+            (mediumPenaltySum / mediumAlphaCount) / 255.0
+        } else {
+            0.0
+        }
+
+        return (normalizedHighAlpha * 0.75) + (normalizedMediumPenalty * 0.25)
+    }
+
+    private fun channelOverflowPenalty(
+        baseComponent: Int,
+        watermarkComponent: Int,
+        alpha: Double
+    ): Double {
+        val denom = 1.0 - alpha
+        if (denom <= 0.0) {
+            return 0.0
+        }
+        val background = (baseComponent - alpha * watermarkComponent) / denom
+        return when {
+            background < -5.0 -> abs(background + 5.0)
+            background > 260.0 -> abs(background - 260.0)
+            else -> 0.0
+        }
+    }
+
+    private data class DetectionVerificationContext(
+        val baseBitmap: Bitmap,
+        val roiRect: Rect,
+        val watermarkPixels: IntArray,
+        val watermarkAlpha: DoubleArray
+    )
 }
