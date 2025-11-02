@@ -85,7 +85,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.consume
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
@@ -829,7 +828,7 @@ fun ExtractorScreen() {
                     label = stringResource(id = R.string.extractor_default_position),
                     options = DefaultOverlayPosition.values(),
                     selected = defaultPosition,
-                    optionLabel = { stringResource(id = it.labelRes) },
+                    optionLabel = { it.labelRes },
                     onOptionSelected = {
                         defaultPosition = it
                         hasManualOverlayPosition = false
@@ -840,14 +839,14 @@ fun ExtractorScreen() {
                     label = stringResource(id = R.string.extractor_preview_filter),
                     options = OverlayPreviewFilter.values(),
                     selected = overlayFilter,
-                    optionLabel = { stringResource(id = it.labelRes) },
+                    optionLabel = { it.labelRes },
                     onOptionSelected = { overlayFilter = it }
                 )
                 SettingDropdown(
                     label = stringResource(id = R.string.extractor_preview_blend_mode),
                     options = OverlayBlendModeOption.values(),
                     selected = blendModeOption,
-                    optionLabel = { stringResource(id = it.labelRes) },
+                    optionLabel = { it.labelRes },
                     onOptionSelected = { blendModeOption = it }
                 )
             }
@@ -904,35 +903,36 @@ fun ExtractorScreen() {
                             )
                             val overlayBitmapLocal = overlayBitmap
                             if (overlayImage != null && overlayBitmapLocal != null) {
-                                val overlayWidthDp = (overlayBitmapLocal.width * scale / density.density).dp
-                                val overlayHeightDp = (overlayBitmapLocal.height * scale / density.density).dp
-                                val offsetXDp = (overlayOffsetX * scale / density.density).dp
-                                val offsetYDp = (overlayOffsetY * scale / density.density).dp
-                                Image(
-                                    bitmap = overlayImage,
-                                    contentDescription = null,
+                                Canvas(
                                     modifier = Modifier
-                                        .align(Alignment.TopStart)
-                                        .offset(offsetXDp, offsetYDp)
-                                        .size(width = overlayWidthDp, height = overlayHeightDp)
+                                        .fillMaxSize()
                                         .pointerInput(overlayBitmapLocal, scale) {
-                                            detectDragGestures { change, dragAmount ->
-                                                change.consume()
+                                            detectDragGestures { _, dragAmount ->
                                                 val deltaX = dragAmount.x / scale
                                                 val deltaY = dragAmount.y / scale
                                                 hasManualOverlayPosition = true
-                                                overlayOffsetX = (overlayOffsetX + deltaX)
-                                                overlayOffsetY = (overlayOffsetY + deltaY)
+                                                overlayOffsetX = overlayOffsetX + deltaX
+                                                overlayOffsetY = overlayOffsetY + deltaY
                                                 clampOverlayOffset(baseBitmap, overlayBitmap)
                                             }
                                         }
-                                        .graphicsLayer {
-                                            alpha = 0.6f
-                                            blendMode = blendModeOption.blendMode
-                                        },
-                                    colorFilter = overlayFilter.colorFilter(),
-                                    contentScale = ContentScale.FillBounds
-                                )
+                                ) {
+                                    val overlayWidthPx = overlayBitmapLocal.width * scale
+                                    val overlayHeightPx = overlayBitmapLocal.height * scale
+                                    val offsetXPx = overlayOffsetX * scale
+                                    val offsetYPx = overlayOffsetY * scale
+                                    drawImage(
+                                        image = overlayImage,
+                                        topLeft = androidx.compose.ui.geometry.Offset(offsetXPx, offsetYPx),
+                                        dstSize = androidx.compose.ui.unit.IntSize(
+                                            overlayWidthPx.roundToInt(),
+                                            overlayHeightPx.roundToInt()
+                                        ),
+                                        alpha = 0.6f,
+                                        colorFilter = overlayFilter.colorFilter(),
+                                        blendMode = blendModeOption.blendMode
+                                    )
+                                }
                             }
                             val rectWidth = extractionWidth * scale
                             val rectHeight = extractionHeight * scale
@@ -1109,7 +1109,7 @@ fun ExtractorScreen() {
                     label = stringResource(id = R.string.extractor_result_filter),
                     options = ResultFilterOption.values(),
                     selected = resultFilter,
-                    optionLabel = { stringResource(id = it.labelRes) },
+                    optionLabel = { it.labelRes },
                     onOptionSelected = { resultFilter = it }
                 )
                 val result = extractedBitmap
@@ -1137,7 +1137,7 @@ private fun <T> SettingDropdown(
     label: String,
     options: Array<T>,
     selected: T,
-    optionLabel: (T) -> String,
+    optionLabel: (T) -> @StringRes Int,
     onOptionSelected: (T) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -1152,12 +1152,12 @@ private fun <T> SettingDropdown(
                 onClick = { expanded = true },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(text = optionLabel(selected))
+                Text(text = stringResource(id = optionLabel(selected)))
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { option ->
                     DropdownMenuItem(
-                        text = { Text(text = optionLabel(option)) },
+                        text = { Text(text = stringResource(id = optionLabel(option))) },
                         onClick = {
                             onOptionSelected(option)
                             expanded = false
@@ -1374,10 +1374,8 @@ private fun grayscaleMatrix(): ColorMatrix {
 }
 
 private fun invertBrightnessMatrix(): ColorMatrix {
-    val matrix = ColorMatrix()
-    matrix.setToSaturation(0f)
-    matrix.postConcat(invertColorMatrix())
-    return matrix
+    val saturationMatrix = ColorMatrix().apply { setToSaturation(0f) }
+    return concatenateColorMatrices(saturationMatrix, invertColorMatrix())
 }
 
 private fun sepiaMatrix(): ColorMatrix {
@@ -1389,6 +1387,30 @@ private fun sepiaMatrix(): ColorMatrix {
             0f, 0f, 0f, 1f, 0f
         )
     )
+}
+
+private fun concatenateColorMatrices(first: ColorMatrix, second: ColorMatrix): ColorMatrix {
+    val a = first.values
+    val b = second.values
+    val result = FloatArray(20)
+    for (row in 0 until 4) {
+        val rowIndex = row * 5
+        for (col in 0 until 4) {
+            val columnIndex = col
+            result[rowIndex + col] =
+                a[rowIndex + 0] * b[columnIndex + 0] +
+                a[rowIndex + 1] * b[columnIndex + 5] +
+                a[rowIndex + 2] * b[columnIndex + 10] +
+                a[rowIndex + 3] * b[columnIndex + 15]
+        }
+        result[rowIndex + 4] =
+            a[rowIndex + 0] * b[4] +
+            a[rowIndex + 1] * b[9] +
+            a[rowIndex + 2] * b[14] +
+            a[rowIndex + 3] * b[19] +
+            a[rowIndex + 4]
+    }
+    return ColorMatrix(result)
 }
 
 @Composable
