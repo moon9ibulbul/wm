@@ -56,6 +56,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
@@ -91,10 +92,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
@@ -661,7 +665,8 @@ fun UnwatermarkerScreen() {
                 selectedDetectionIndices = emptySet()
             },
             valueRange = -1000f..1000f,
-            valueFormatter = { value -> "${value.roundToInt()} px" }
+            valueFormatter = { value -> "${value.roundToInt()} px" },
+            allowManualInput = true
         )
         SliderCard(
             title = stringResource(id = R.string.offset_y),
@@ -671,7 +676,8 @@ fun UnwatermarkerScreen() {
                 selectedDetectionIndices = emptySet()
             },
             valueRange = -1000f..1000f,
-            valueFormatter = { value -> "${value.roundToInt()} px" }
+            valueFormatter = { value -> "${value.roundToInt()} px" },
+            allowManualInput = true
         )
         SliderCard(
             title = stringResource(id = R.string.alpha_adjust),
@@ -1805,7 +1811,10 @@ private fun AppFooter(modifier: Modifier = Modifier) {
     ClickableText(
         text = annotatedText,
         modifier = modifier.fillMaxWidth(),
-        style = MaterialTheme.typography.bodySmall.copy(textAlign = TextAlign.Center),
+        style = MaterialTheme.typography.bodySmall.copy(
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface
+        ),
         onClick = { offset ->
             annotatedText.getStringAnnotations(tag = "astralexpress", start = offset, end = offset)
                 .firstOrNull()
@@ -2067,7 +2076,8 @@ private fun SliderCard(
     valueRange: ClosedFloatingPointRange<Float>,
     steps: Int = 0,
     valueFormatter: (Float) -> String,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    allowManualInput: Boolean = false
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -2085,8 +2095,63 @@ private fun SliderCard(
                     activeTrackColor = MaterialTheme.colorScheme.primary
                 )
             )
+            if (allowManualInput) {
+                Spacer(modifier = Modifier.height(12.dp))
+                ManualValueInput(
+                    value = value,
+                    onValueChange = onValueChange,
+                    valueRange = valueRange,
+                    enabled = enabled
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun ManualValueInput(
+    value: Float,
+    onValueChange: (Float) -> Unit,
+    valueRange: ClosedFloatingPointRange<Float>,
+    enabled: Boolean
+) {
+    var textValue by remember { mutableStateOf(value.roundToInt().toString()) }
+    LaunchedEffect(value) {
+        val rounded = value.roundToInt().toString()
+        if (textValue != rounded) {
+            textValue = rounded
+        }
+    }
+    OutlinedTextField(
+        value = textValue,
+        onValueChange = { newValue ->
+            val filtered = newValue.filterIndexed { index, char ->
+                char.isDigit() || (char == '-' && index == 0)
+            }
+            textValue = filtered
+            val parsed = filtered.toIntOrNull()
+            if (parsed != null) {
+                val clamped = parsed.coerceIn(
+                    valueRange.start.roundToInt(),
+                    valueRange.endInclusive.roundToInt()
+                )
+                if (clamped.toFloat() != value) {
+                    onValueChange(clamped.toFloat())
+                }
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = enabled,
+        singleLine = true,
+        label = { Text(text = stringResource(id = R.string.manual_value_label)) },
+        keyboardOptions = KeyboardOptions(
+            keyboardType = KeyboardType.Number,
+            imeAction = ImeAction.Done
+        ),
+        trailingIcon = {
+            Text(text = stringResource(id = R.string.pixels_suffix))
+        }
+    )
 }
 
 private fun collectOffsets(

@@ -12,6 +12,8 @@
     <string name="auto_guess_alpha">Perkirakan alpha watermark otomatis</string>
     <string name="transparency_threshold">Ambang Transparansi</string>
     <string name="opaque_threshold">Ambang Opak</string>
+    <string name="manual_value_label">Nilai offset</string>
+    <string name="pixels_suffix">px</string>
     <string name="processing">Memproses…</string>
     <string name="no_image_loaded">Silakan pilih gambar dan watermark terlebih dahulu.</string>
     <string name="saved_to_gallery">Disimpan ke galeri</string>
