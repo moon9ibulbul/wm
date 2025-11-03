@@ -1617,8 +1617,10 @@ private fun PreviewCard(
                 var previewScale by remember { mutableFloatStateOf(1f) }
                 var dragOffsetX by remember { mutableFloatStateOf(offsetX) }
                 var dragOffsetY by remember { mutableFloatStateOf(offsetY) }
+                var previewTranslation by remember { mutableStateOf(Offset.Zero) }
                 LaunchedEffect(base, currentWatermarkBitmap) {
                     previewScale = 1f
+                    previewTranslation = Offset.Zero
                 }
                 LaunchedEffect(offsetX, offsetY) {
                     dragOffsetX = offsetX
@@ -1629,6 +1631,7 @@ private fun PreviewCard(
                 ) {
                     val baseWidthPx = with(density) { maxWidth.toPx() }
                     val scale = if (base.width == 0) 1f else baseWidthPx / base.width
+                    val baseHeightPx = base.height * scale
                     val aspectRatio = if (base.height == 0) 1f else base.width.toFloat() / base.height.toFloat()
                     Box(
                         modifier = Modifier
@@ -1637,16 +1640,44 @@ private fun PreviewCard(
                             .graphicsLayer {
                                 scaleX = previewScale
                                 scaleY = previewScale
+                                translationX = previewTranslation.x
+                                translationY = previewTranslation.y
                                 transformOrigin = TransformOrigin(0f, 0f)
                                 clip = false
                             }
                             .pointerInput(base, currentWatermarkBitmap) {
-                                detectTransformGestures(panZoomLock = true) { _, _, zoom, _ ->
+                                detectTransformGestures { centroid, pan, zoom, _ ->
                                     if (!zoom.isNaN() && zoom != 1f) {
                                         val newScale = (previewScale * zoom).coerceIn(1f, 4f)
-                                        if (newScale != previewScale) {
-                                            previewScale = newScale
-                                        }
+                                        val scaleChange = if (previewScale == 0f) 1f else newScale / previewScale
+                                        val scaledWidth = baseWidthPx * newScale
+                                        val scaledHeight = baseHeightPx * newScale
+                                        val minTranslationX = baseWidthPx - scaledWidth
+                                        val minTranslationY = baseHeightPx - scaledHeight
+                                        val maxTranslationX = 0f
+                                        val maxTranslationY = 0f
+
+                                        var newTranslation = previewTranslation + pan
+                                        newTranslation = centroid - (centroid - newTranslation) * scaleChange
+
+                                        val clampedX = newTranslation.x.coerceIn(minTranslationX, maxTranslationX)
+                                        val clampedY = newTranslation.y.coerceIn(minTranslationY, maxTranslationY)
+
+                                        previewTranslation = Offset(clampedX, clampedY)
+                                        previewScale = newScale
+                                    } else if (pan != Offset.Zero) {
+                                        val scaledWidth = baseWidthPx * previewScale
+                                        val scaledHeight = baseHeightPx * previewScale
+                                        val minTranslationX = baseWidthPx - scaledWidth
+                                        val minTranslationY = baseHeightPx - scaledHeight
+                                        val maxTranslationX = 0f
+                                        val maxTranslationY = 0f
+
+                                        val newTranslation = previewTranslation + pan
+                                        val clampedX = newTranslation.x.coerceIn(minTranslationX, maxTranslationX)
+                                        val clampedY = newTranslation.y.coerceIn(minTranslationY, maxTranslationY)
+
+                                        previewTranslation = Offset(clampedX, clampedY)
                                     }
                                 }
                             }
