@@ -1835,7 +1835,7 @@ private fun AppFooter(modifier: Modifier = Modifier) {
                     append("AstralExpress")
                 }
                 pop()
-                append(" v1.6.0")
+                append(" v1.6.1")
             }
         }
     }
